@@ -116,15 +116,15 @@ func TestServerInterceptors(t *testing.T) {
 	t.Run("combineThenConvert", asTest(
 		nil,  nil,
 		func(ints []ServerInterceptor) grpc.StreamServerInterceptor {
-			return ServerInterceptorAsGrpcStream(combineServerInterceptors(ints))
+			return ServerInterceptorAsGrpcStream(CombineServerInterceptors(ints))
 		},
 		func(ints []ServerInterceptor) grpc.UnaryServerInterceptor {
-			return ServerInterceptorAsGrpcUnary(combineServerInterceptors(ints))
+			return ServerInterceptorAsGrpcUnary(CombineServerInterceptors(ints))
 		}))
 	t.Run("combineThenConvertFromStream", asTest(
 		nil,  nil, nil,
 		func(ints []ServerInterceptor) grpc.UnaryServerInterceptor {
-			return StreamServerInterceptorToUnary(ServerInterceptorAsGrpcStream(combineServerInterceptors(ints)))
+			return StreamServerInterceptorToUnary(ServerInterceptorAsGrpcStream(CombineServerInterceptors(ints)))
 		}))
 	t.Run("convertThenCombine", asTest(
 		nil,  nil,

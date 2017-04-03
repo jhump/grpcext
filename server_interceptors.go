@@ -14,13 +14,13 @@ import (
 // WithServerInterceptorsUnary returns a ServerOption, for configuring a GRPC server that uses the
 // given interceptors with unary RPC methods.
 func WithServerInterceptorsUnary(interceptors ...ServerInterceptor) grpc.ServerOption {
-	return grpc.UnaryInterceptor(ServerInterceptorAsGrpcUnary(combineServerInterceptors(interceptors)))
+	return grpc.UnaryInterceptor(ServerInterceptorAsGrpcUnary(CombineServerInterceptors(interceptors)))
 }
 
 // WithServerInterceptorsStream returns a ServerOption, for configuring a GRPC server that uses the
 // given interceptors with streaming RPC methods.
 func WithServerInterceptorsStream(interceptors ...ServerInterceptor) grpc.ServerOption {
-	return grpc.StreamInterceptor(ServerInterceptorAsGrpcStream(combineServerInterceptors(interceptors)))
+	return grpc.StreamInterceptor(ServerInterceptorAsGrpcStream(CombineServerInterceptors(interceptors)))
 }
 
 // CombineUnaryServerInterceptors combines the given interceptors, in order, and returns a single
@@ -326,9 +326,9 @@ func (s contextServerStream) RecvMsg(m interface{}) error {
 	return s.ss.RecvMsg(m)
 }
 
-// combineServerInterceptors combines the given slice of interceptors into a single interceptor.
+// CombineServerInterceptors combines the given slice of interceptors into a single interceptor.
 // The first interceptor in the slice is the first invoked and so on.
-func combineServerInterceptors(interceptors []ServerInterceptor) ServerInterceptor {
+func CombineServerInterceptors(interceptors []ServerInterceptor) ServerInterceptor {
 	if len(interceptors) == 0 {
 		return nil
 	}

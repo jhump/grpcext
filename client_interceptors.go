@@ -14,13 +14,13 @@ import (
 // WithClientInterceptorsUnary returns a client DialOption, for configuring a GRPC client that uses the
 // given interceptors with unary RPC methods.
 func WithClientInterceptorsUnary(interceptors ...ClientInterceptor) grpc.DialOption {
-	return grpc.WithUnaryInterceptor(ClientInterceptorAsGrpcUnary(combineClientInterceptors(interceptors)))
+	return grpc.WithUnaryInterceptor(ClientInterceptorAsGrpcUnary(CombineClientInterceptors(interceptors)))
 }
 
 // WithClientInterceptorsStream returns a client DialOption, for configuring a GRPC client that uses the
 // given interceptors with streaming RPC methods.
 func WithClientInterceptorsStream(interceptors ...ClientInterceptor) grpc.DialOption {
-	return grpc.WithStreamInterceptor(ClientInterceptorAsGrpcStream(combineClientInterceptors(interceptors)))
+	return grpc.WithStreamInterceptor(ClientInterceptorAsGrpcStream(CombineClientInterceptors(interceptors)))
 }
 
 // CombineUnaryClientInterceptors combines the given interceptors, in order, and returns a single
@@ -395,9 +395,9 @@ func (c contextClientStream) RecvMsg(m interface{}) error {
 	return c.cs.RecvMsg(m)
 }
 
-// combineClientInterceptors combines the given slice of interceptors into a single interceptor.
+// CombineClientInterceptors combines the given slice of interceptors into a single interceptor.
 // The first interceptor in the slice is the first invoked and so on.
-func combineClientInterceptors(interceptors []ClientInterceptor) ClientInterceptor {
+func CombineClientInterceptors(interceptors []ClientInterceptor) ClientInterceptor {
 	if len(interceptors) == 0 {
 		return nil
 	}
