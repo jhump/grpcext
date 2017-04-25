@@ -82,9 +82,13 @@ func StreamServerInterceptorToUnary(interceptor grpc.StreamServerInterceptor) gr
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		stream := &unaryServerStream{ctx: ctx, req: req}
 		streamHandler, err := handlerAsStream(reflect.TypeOf(req), handler)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		err = interceptor(info.Server, stream, &grpc.StreamServerInfo{FullMethod: info.FullMethod}, streamHandler)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		if stream.resp == nil {
 			return nil, grpc.Errorf(codes.Internal, "Missing response message")
 		}

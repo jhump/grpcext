@@ -19,10 +19,10 @@ import (
 
 var (
 	actualClientStream *grpc.StreamClientInterceptor
-	actualClientUnary *grpc.UnaryClientInterceptor
+	actualClientUnary  *grpc.UnaryClientInterceptor
 
 	actualServerStream *grpc.StreamServerInterceptor
-	actualServerUnary *grpc.UnaryServerInterceptor
+	actualServerUnary  *grpc.UnaryServerInterceptor
 
 	stub grpc_testing.TestServiceClient
 )
@@ -114,7 +114,7 @@ func TestClientInterceptors(t *testing.T) {
 
 func TestServerInterceptors(t *testing.T) {
 	t.Run("combineThenConvert", asTest(
-		nil,  nil,
+		nil, nil,
 		func(ints []ServerInterceptor) grpc.StreamServerInterceptor {
 			return ServerInterceptorAsGrpcStream(CombineServerInterceptors(ints))
 		},
@@ -122,12 +122,12 @@ func TestServerInterceptors(t *testing.T) {
 			return ServerInterceptorAsGrpcUnary(CombineServerInterceptors(ints))
 		}))
 	t.Run("combineThenConvertFromStream", asTest(
-		nil,  nil, nil,
+		nil, nil, nil,
 		func(ints []ServerInterceptor) grpc.UnaryServerInterceptor {
 			return StreamServerInterceptorToUnary(ServerInterceptorAsGrpcStream(CombineServerInterceptors(ints)))
 		}))
 	t.Run("convertThenCombine", asTest(
-		nil,  nil,
+		nil, nil,
 		func(ints []ServerInterceptor) grpc.StreamServerInterceptor {
 			grpcInts := make([]grpc.StreamServerInterceptor, len(ints))
 			for i, in := range ints {
@@ -143,7 +143,7 @@ func TestServerInterceptors(t *testing.T) {
 			return CombineUnaryServerInterceptors(grpcInts...)
 		}))
 	t.Run("convertThenCombineFromStream", asTest(
-		nil,  nil, nil,
+		nil, nil, nil,
 		func(ints []ServerInterceptor) grpc.UnaryServerInterceptor {
 			grpcInts := make([]grpc.StreamServerInterceptor, len(ints))
 			for i, in := range ints {
@@ -152,7 +152,7 @@ func TestServerInterceptors(t *testing.T) {
 			return StreamServerInterceptorToUnary(CombineStreamServerInterceptors(grpcInts...))
 		}))
 	t.Run("convertFromStreamThenCombine", asTest(
-		nil,  nil, nil,
+		nil, nil, nil,
 		func(ints []ServerInterceptor) grpc.UnaryServerInterceptor {
 			grpcInts := make([]grpc.UnaryServerInterceptor, len(ints))
 			for i, in := range ints {
@@ -164,7 +164,7 @@ func TestServerInterceptors(t *testing.T) {
 
 var payload = &grpc_testing.Payload{
 	Type: grpc_testing.PayloadType_RANDOM.Enum(),
-	Body: []byte{ 3, 14, 159, 2, 65, 35, 9 },
+	Body: []byte{3, 14, 159, 2, 65, 35, 9},
 }
 
 func asTest(
@@ -204,7 +204,7 @@ func asTest(
 			}
 			strInResp, err := cs.CloseAndRecv()
 			ok(t, err, "Receiving response failed")
-			expSize := int32(3*len(payload.Body))
+			expSize := int32(3 * len(payload.Body))
 			eq(t, expSize, strInResp.GetAggregatedPayloadSize(), "Incorrect response received!\nExpected %v\nGot %v", expSize, strInResp.AggregatedPayloadSize)
 			checkCounts(t, &lock, &ints, &reqs, &resps, clientStream != nil, serverStream != nil, 3, 1)
 			// reset
@@ -299,7 +299,7 @@ const numInterceptors = 3
 
 func makeClientInterceptors(desc *methodDesc, lock *sync.Mutex, ints, reqs, resps *[]int) []ClientInterceptor {
 	var ret []ClientInterceptor
-	for i := 0; i < numInterceptors ; i++ {
+	for i := 0; i < numInterceptors; i++ {
 		ret = append(ret, makeClientInterceptor(desc, i, lock, ints, reqs, resps))
 	}
 	return ret
@@ -307,7 +307,7 @@ func makeClientInterceptors(desc *methodDesc, lock *sync.Mutex, ints, reqs, resp
 
 func makeServerInterceptors(desc *methodDesc, lock *sync.Mutex, ints, reqs, resps *[]int) []ServerInterceptor {
 	var ret []ServerInterceptor
-	for i := 0; i < numInterceptors ; i++ {
+	for i := 0; i < numInterceptors; i++ {
 		ret = append(ret, makeServerInterceptor(desc, i+numInterceptors, lock, ints, reqs, resps))
 	}
 	return ret
@@ -346,7 +346,7 @@ func checkCounts(t *testing.T, lock *sync.Mutex, ints, reqs, resps *[]int, incCl
 	reqi := 0
 	for j := 0; j < numReqs; j++ {
 		for i := start; i < end; i++ {
-			eq(t, i * 10, (*reqs)[reqi], "Wrong message observer")
+			eq(t, i*10, (*reqs)[reqi], "Wrong message observer")
 			reqi++
 		}
 	}
@@ -354,7 +354,7 @@ func checkCounts(t *testing.T, lock *sync.Mutex, ints, reqs, resps *[]int, incCl
 	respi := 0
 	for j := 0; j < numResps; j++ {
 		for i := end - 1; i >= start; i-- {
-			eq(t, i * 100, (*resps)[respi], "Wrong message observer")
+			eq(t, i*100, (*resps)[respi], "Wrong message observer")
 			respi++
 		}
 	}
@@ -430,8 +430,8 @@ func intercept(where string, ctx context.Context, info *StreamClientInfo, opts [
 	lock.Lock()
 	*ints = append(*ints, index)
 	lock.Unlock()
-	reqObs := makeObserver(where, desc.reqType, index * 10, lock, reqs)
-	respObs := makeObserver(where, desc.respType, index * 100, lock, resps)
+	reqObs := makeObserver(where, desc.reqType, index*10, lock, reqs)
+	respObs := makeObserver(where, desc.respType, index*100, lock, resps)
 	return proceed(ctx, opts, reqObs, respObs)
 }
 
@@ -488,7 +488,7 @@ func swappingUnaryServerInterceptor(ctx context.Context, req interface{}, info *
 }
 
 // very simple test service that just echos back request payloads
-type TestService struct {}
+type TestService struct{}
 
 func (_ TestService) EmptyCall(context.Context, *grpc_testing.Empty) (*grpc_testing.Empty, error) {
 	return &grpc_testing.Empty{}, nil
@@ -513,8 +513,12 @@ func (_ TestService) StreamingInputCall(ss grpc_testing.TestService_StreamingInp
 	sz := 0
 	for {
 		req, err := ss.Recv()
-		if err == io.EOF { break }
-		if err != nil { return err }
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
 		sz += len(req.Payload.GetBody())
 	}
 	return ss.SendAndClose(&grpc_testing.StreamingInputCallResponse{
@@ -525,13 +529,19 @@ func (_ TestService) StreamingInputCall(ss grpc_testing.TestService_StreamingInp
 func (_ TestService) FullDuplexCall(ss grpc_testing.TestService_FullDuplexCallServer) error {
 	for {
 		req, err := ss.Recv()
-		if err == io.EOF { return nil }
-		if err != nil { return err }
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 
 		err = ss.Send(&grpc_testing.StreamingOutputCallResponse{
 			Payload: req.Payload,
 		})
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 	}
 }
 
@@ -539,8 +549,12 @@ func (_ TestService) HalfDuplexCall(ss grpc_testing.TestService_HalfDuplexCallSe
 	var data []*grpc_testing.Payload
 	for {
 		req, err := ss.Recv()
-		if err == io.EOF { break }
-		if err != nil { return err }
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
 		data = append(data, req.Payload)
 	}
 
@@ -548,7 +562,9 @@ func (_ TestService) HalfDuplexCall(ss grpc_testing.TestService_HalfDuplexCallSe
 		err := ss.Send(&grpc_testing.StreamingOutputCallResponse{
 			Payload: d,
 		})
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -81,15 +81,25 @@ func clientProceedStream(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.Cl
 func StreamClientInterceptorToUnary(interceptor grpc.StreamClientInterceptor) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		streamer, err := invokerAsStreamer(reflect.TypeOf(reply), invoker)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		cs, err := interceptor(ctx, &grpc.StreamDesc{StreamName: method}, cc, method, streamer, opts...)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		err = cs.SendMsg(req)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		err = cs.CloseSend()
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		err = cs.RecvMsg(reply)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		err = cs.RecvMsg(reply)
 		if err != io.EOF {
 			return grpc.Errorf(codes.Internal, "Too many response messages sent")
@@ -139,7 +149,7 @@ const (
 
 func (c *unaryClientStream) Header() (metadata.MD, error) {
 	c.changeState(stateAwaitingHeaders, nil)
-	<- c.ctx.Done()
+	<-c.ctx.Done()
 	return c.header, c.err
 }
 
@@ -179,8 +189,10 @@ func (c *unaryClientStream) SendMsg(m interface{}) error {
 
 func (c *unaryClientStream) RecvMsg(m interface{}) error {
 	c.changeState(stateAwaitingResponse, m)
-	<- c.ctx.Done()
-	if c.err != nil { return c.err }
+	<-c.ctx.Done()
+	if c.err != nil {
+		return c.err
+	}
 
 	// make sure response is populated correctly
 	c.mu.Lock()
@@ -235,8 +247,8 @@ func (c *unaryClientStream) addStateLocked(s int) int {
 func readyToInvoke(state int) bool {
 	// we are ready to invoke RPC if we've closed sending and are awaiting something
 	// (either headers or response)
-	return (state & stateSendingClosed) != 0 &&
-			(state & (stateAwaitingHeaders | stateAwaitingResponse)) != 0
+	return (state&stateSendingClosed) != 0 &&
+		(state&(stateAwaitingHeaders|stateAwaitingResponse)) != 0
 }
 
 // ClientInterceptor provides a limited interface for intercepting calls and exchanged messages
@@ -322,7 +334,7 @@ func ClientInterceptorAsGrpcStream(i ClientInterceptor) grpc.StreamClientInterce
 			return nil
 		}
 		info := &StreamClientInfo{
-			FullMethod: method,
+			FullMethod:     method,
 			IsClientStream: desc.ClientStreams,
 			IsServerStream: desc.ServerStreams,
 		}
@@ -396,7 +408,6 @@ func (c contextClientStream) Context() context.Context {
 func (c contextClientStream) CloseSend() error {
 	return c.cs.CloseSend()
 }
-
 
 func (c contextClientStream) SendMsg(m interface{}) error {
 	return c.cs.SendMsg(m)
