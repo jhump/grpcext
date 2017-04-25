@@ -62,16 +62,16 @@ func TestMain(m *testing.M) {
 func TestClientInterceptors(t *testing.T) {
 	t.Run("combineThenConvert", asTest(
 		func(ints []ClientInterceptor) grpc.StreamClientInterceptor {
-			return ClientInterceptorAsGrpcStream(combineClientInterceptors(ints))
+			return ClientInterceptorAsGrpcStream(CombineClientInterceptors(ints))
 		},
 		func(ints []ClientInterceptor) grpc.UnaryClientInterceptor {
-			return ClientInterceptorAsGrpcUnary(combineClientInterceptors(ints))
+			return ClientInterceptorAsGrpcUnary(CombineClientInterceptors(ints))
 		},
 		nil, nil))
 	t.Run("combineThenConvertFromStream", asTest(
 		nil,
 		func(ints []ClientInterceptor) grpc.UnaryClientInterceptor {
-			return StreamClientInterceptorToUnary(ClientInterceptorAsGrpcStream(combineClientInterceptors(ints)))
+			return StreamClientInterceptorToUnary(ClientInterceptorAsGrpcStream(CombineClientInterceptors(ints)))
 		},
 		nil, nil))
 	t.Run("convertThenCombine", asTest(
@@ -401,18 +401,23 @@ var bidiStreamMethod = &methodDesc{
 }
 
 func makeClientInterceptor(desc *methodDesc, index int, lock *sync.Mutex, ints, reqs, resps *[]int) ClientInterceptor {
-	return func(ctx context.Context, cc *grpc.ClientConn, info *grpc.StreamServerInfo, proceed Invocation) error {
-		return intercept("client", ctx, info, proceed, desc, index, lock, ints, reqs, resps)
+	return func(ctx context.Context, cc *grpc.ClientConn, info *StreamClientInfo, opts []grpc.CallOption, proceed ClientInvocation) error {
+		return intercept("client", ctx, info, opts, proceed, desc, index, lock, ints, reqs, resps)
 	}
 }
 
 func makeServerInterceptor(desc *methodDesc, index int, lock *sync.Mutex, ints, reqs, resps *[]int) ServerInterceptor {
-	return func(ctx context.Context, srv interface{}, info *grpc.StreamServerInfo, proceed Invocation) error {
-		return intercept("server", ctx, info, proceed, desc, index, lock, ints, reqs, resps)
+	return func(ctx context.Context, srv interface{}, info *grpc.StreamServerInfo, proceed ServerInvocation) error {
+		return intercept("server", ctx,
+			&StreamClientInfo{FullMethod: info.FullMethod, IsClientStream: info.IsClientStream, IsServerStream: info.IsServerStream}, nil,
+			func(ctx context.Context, _ []grpc.CallOption, reqObs MessageObserver, respObs MessageObserver) error {
+				return proceed(ctx, reqObs, respObs)
+			},
+			desc, index, lock, ints, reqs, resps)
 	}
 }
 
-func intercept(where string, ctx context.Context, info *grpc.StreamServerInfo, proceed Invocation, desc *methodDesc, index int, lock *sync.Mutex, ints, reqs, resps *[]int) error {
+func intercept(where string, ctx context.Context, info *StreamClientInfo, opts []grpc.CallOption, proceed ClientInvocation, desc *methodDesc, index int, lock *sync.Mutex, ints, reqs, resps *[]int) error {
 	if info.FullMethod != desc.name {
 		return fmt.Errorf("Wrong method in %s; got %q, expected %q", where, info.FullMethod, desc.name)
 	}
@@ -427,7 +432,7 @@ func intercept(where string, ctx context.Context, info *grpc.StreamServerInfo, p
 	lock.Unlock()
 	reqObs := makeObserver(where, desc.reqType, index * 10, lock, reqs)
 	respObs := makeObserver(where, desc.respType, index * 100, lock, resps)
-	return proceed(ctx, reqObs, respObs)
+	return proceed(ctx, opts, reqObs, respObs)
 }
 
 func makeObserver(where string, msgType reflect.Type, index int, lock *sync.Mutex, msgs *[]int) MessageObserver {

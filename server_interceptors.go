@@ -185,7 +185,7 @@ func (s *unaryServerStream) RecvMsg(m interface{}) error {
 // be adapted to GRPC's unary and streaming interceptor interfaces.
 //
 // The interceptor must call the given Invocation in order to continue servicing the stream.
-type ServerInterceptor func(ctx context.Context, srv interface{}, info *grpc.StreamServerInfo, proceed Invocation) error
+type ServerInterceptor func(ctx context.Context, srv interface{}, info *grpc.StreamServerInfo, proceed ServerInvocation) error
 
 // ServerInterceptorAsGrpcUnary converts an interceptor into an equivalent GRPC unary interceptor.
 // If multiple interceptors, after being converted to GRPC unary interceptors, are combined then
@@ -332,12 +332,12 @@ func CombineServerInterceptors(interceptors []ServerInterceptor) ServerIntercept
 	if len(interceptors) == 0 {
 		return nil
 	}
-	return func(ctx context.Context, srv interface{}, info *grpc.StreamServerInfo, proceed Invocation) error {
+	return func(ctx context.Context, srv interface{}, info *grpc.StreamServerInfo, proceed ServerInvocation) error {
 		return serverProceed(ctx, srv, info, proceed, interceptors, nil, nil)
 	}
 }
 
-func serverProceed(ctx context.Context, srv interface{}, info *grpc.StreamServerInfo, handler Invocation, ints []ServerInterceptor, reqObs []MessageObserver, respObs []MessageObserver) error {
+func serverProceed(ctx context.Context, srv interface{}, info *grpc.StreamServerInfo, handler ServerInvocation, ints []ServerInterceptor, reqObs []MessageObserver, respObs []MessageObserver) error {
 	if len(ints) == 0 {
 		return handler(ctx, mergeRequestObservers(reqObs), mergeResponseObservers(respObs))
 	} else {

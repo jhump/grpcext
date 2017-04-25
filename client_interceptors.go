@@ -243,8 +243,19 @@ func readyToInvoke(state int) bool {
 // that can easily be implemented to handle both unary and streaming RPCs. Similarly, it can easily
 // be adapted to GRPC's unary and streaming interceptor interfaces.
 //
-// The interceptor must call the given Invocation in order to continue servicing the stream.
-type ClientInterceptor func(ctx context.Context, cc *grpc.ClientConn, info *grpc.StreamServerInfo, proceed Invocation) error
+// The interceptor must call the given clientInvocation in order to continue servicing the stream.
+type ClientInterceptor func(ctx context.Context, cc *grpc.ClientConn, info *StreamClientInfo, opts []grpc.CallOption, proceed ClientInvocation) error
+
+// StreamClientInfo represents properties of a GRPC method. It is structurally the same
+// as grpc.StreamServerInfo, but used in client contexts.
+type StreamClientInfo struct {
+	// FullMethod is the full RPC method string, i.e., /package.service/method.
+	FullMethod string
+	// IsClientStream indicates whether the RPC is a client streaming RPC.
+	IsClientStream bool
+	// IsServerStream indicates whether the RPC is a server streaming RPC.
+	IsServerStream bool
+}
 
 // ClientInterceptorAsGrpcUnary converts an interceptor into an equivalent GRPC unary interceptor.
 // If multiple interceptors, after being converted to GRPC unary interceptors, are combined then
@@ -260,7 +271,7 @@ type ClientInterceptor func(ctx context.Context, cc *grpc.ClientConn, info *grpc
 // back to the first one.
 func ClientInterceptorAsGrpcUnary(i ClientInterceptor) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		proceed := func(ctx context.Context, reqObs MessageObserver, respObs MessageObserver) error {
+		proceed := func(ctx context.Context, opts []grpc.CallOption, reqObs MessageObserver, respObs MessageObserver) error {
 			if reqObs != nil {
 				if err := reqObs(req); err != nil {
 					return err
@@ -277,7 +288,7 @@ func ClientInterceptorAsGrpcUnary(i ClientInterceptor) grpc.UnaryClientIntercept
 				return nil
 			}
 		}
-		return i(ctx, cc, &grpc.StreamServerInfo{FullMethod: method}, proceed)
+		return i(ctx, cc, &StreamClientInfo{FullMethod: method}, opts, proceed)
 	}
 }
 
@@ -296,7 +307,7 @@ func ClientInterceptorAsGrpcUnary(i ClientInterceptor) grpc.UnaryClientIntercept
 func ClientInterceptorAsGrpcStream(i ClientInterceptor) grpc.StreamClientInterceptor {
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 		var cs grpc.ClientStream
-		proceed := func(ctx context.Context, reqObs MessageObserver, respObs MessageObserver) error {
+		proceed := func(ctx context.Context, opts []grpc.CallOption, reqObs MessageObserver, respObs MessageObserver) error {
 			stream, err := streamer(ctx, desc, cc, method, opts...)
 			if err != nil {
 				return err
@@ -310,12 +321,12 @@ func ClientInterceptorAsGrpcStream(i ClientInterceptor) grpc.StreamClientInterce
 			}
 			return nil
 		}
-		info := &grpc.StreamServerInfo{
+		info := &StreamClientInfo{
 			FullMethod: method,
 			IsClientStream: desc.ClientStreams,
 			IsServerStream: desc.ServerStreams,
 		}
-		return cs, i(ctx, cc, info, proceed)
+		return cs, i(ctx, cc, info, opts, proceed)
 	}
 }
 
@@ -401,17 +412,17 @@ func CombineClientInterceptors(interceptors []ClientInterceptor) ClientIntercept
 	if len(interceptors) == 0 {
 		return nil
 	}
-	return func(ctx context.Context, cc *grpc.ClientConn, info *grpc.StreamServerInfo, proceed Invocation) error {
-		return clientProceed(ctx, cc, info, proceed, interceptors, nil, nil)
+	return func(ctx context.Context, cc *grpc.ClientConn, info *StreamClientInfo, opts []grpc.CallOption, proceed ClientInvocation) error {
+		return clientProceed(ctx, cc, info, opts, proceed, interceptors, nil, nil)
 	}
 }
 
-func clientProceed(ctx context.Context, cc *grpc.ClientConn, info *grpc.StreamServerInfo, handler Invocation, ints []ClientInterceptor, reqObs []MessageObserver, respObs []MessageObserver) error {
+func clientProceed(ctx context.Context, cc *grpc.ClientConn, info *StreamClientInfo, opts []grpc.CallOption, handler ClientInvocation, ints []ClientInterceptor, reqObs []MessageObserver, respObs []MessageObserver) error {
 	if len(ints) == 0 {
-		return handler(ctx, mergeRequestObservers(reqObs), mergeResponseObservers(respObs))
+		return handler(ctx, opts, mergeRequestObservers(reqObs), mergeResponseObservers(respObs))
 	} else {
 		interceptor := ints[0]
-		return interceptor(ctx, cc, info, func(ctx context.Context, reqOb MessageObserver, respOb MessageObserver) error {
+		return interceptor(ctx, cc, info, opts, func(ctx context.Context, opts []grpc.CallOption, reqOb MessageObserver, respOb MessageObserver) error {
 			reqs := reqObs
 			if reqOb != nil {
 				reqs = append(reqs, reqOb)
@@ -420,7 +431,7 @@ func clientProceed(ctx context.Context, cc *grpc.ClientConn, info *grpc.StreamSe
 			if respOb != nil {
 				resps = append(resps, respOb)
 			}
-			return clientProceed(ctx, cc, info, handler, ints[1:], reqs, resps)
+			return clientProceed(ctx, cc, info, opts, handler, ints[1:], reqs, resps)
 		})
 	}
 }
