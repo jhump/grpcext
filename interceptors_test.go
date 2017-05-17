@@ -5,7 +5,9 @@ import (
 	"io"
 	"net"
 	"os"
+	"path"
 	"reflect"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +16,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/grpc_testing"
 )
 
@@ -60,52 +63,44 @@ func TestMain(m *testing.M) {
 }
 
 func TestClientInterceptors(t *testing.T) {
-	t.Run("combineThenConvert", asTest(
-		func(ints []ClientInterceptor) grpc.StreamClientInterceptor {
-			return ClientInterceptorAsGrpcStream(CombineClientInterceptors(ints))
+	t.Run("combine", asTest(
+		func(ints []grpc.StreamClientInterceptor) grpc.StreamClientInterceptor {
+			return CombineStreamClientInterceptors(ints...)
 		},
-		func(ints []ClientInterceptor) grpc.UnaryClientInterceptor {
-			return ClientInterceptorAsGrpcUnary(CombineClientInterceptors(ints))
+		nil, nil, nil))
+	t.Run("combineThenConvert", asTest(
+		nil,
+		func(ints []grpc.StreamClientInterceptor) grpc.UnaryClientInterceptor {
+			return StreamClientInterceptorToUnary(CombineStreamClientInterceptors(ints...))
 		},
 		nil, nil))
-	t.Run("combineThenConvertFromStream", asTest(
+	t.Run("convertInChunks", asTest(
 		nil,
-		func(ints []ClientInterceptor) grpc.UnaryClientInterceptor {
-			return StreamClientInterceptorToUnary(ClientInterceptorAsGrpcStream(CombineClientInterceptors(ints)))
+		func(ints []grpc.StreamClientInterceptor) grpc.UnaryClientInterceptor {
+			// We break these up into a mix of unary and stream interceptors and then use
+			// combineIntoUnary, which will collapse (convert then combine) adjacent stream
+			// interceptors into a single unary interceptor and then combine the resulting
+			// set of unary interceptors.
+			var converted []interface{}
+			j, k := 0, 1
+			for i := range ints {
+				if i == 0 || i >= j + k {
+					converted = append(converted, StreamClientInterceptorToUnary(ints[i]))
+					j = i + 1
+					k++
+				} else {
+					converted = append(converted, ints[i])
+				}
+			}
+			return combineClientInterceptorsIntoUnary(converted)
 		},
 		nil, nil))
 	t.Run("convertThenCombine", asTest(
-		func(ints []ClientInterceptor) grpc.StreamClientInterceptor {
-			grpcInts := make([]grpc.StreamClientInterceptor, len(ints))
-			for i, in := range ints {
-				grpcInts[i] = ClientInterceptorAsGrpcStream(in)
-			}
-			return CombineStreamClientInterceptors(grpcInts...)
-		},
-		func(ints []ClientInterceptor) grpc.UnaryClientInterceptor {
+		nil,
+		func(ints []grpc.StreamClientInterceptor) grpc.UnaryClientInterceptor {
 			grpcInts := make([]grpc.UnaryClientInterceptor, len(ints))
 			for i, in := range ints {
-				grpcInts[i] = ClientInterceptorAsGrpcUnary(in)
-			}
-			return CombineUnaryClientInterceptors(grpcInts...)
-		},
-		nil, nil))
-	t.Run("convertThenCombineFromStream", asTest(
-		nil,
-		func(ints []ClientInterceptor) grpc.UnaryClientInterceptor {
-			grpcInts := make([]grpc.StreamClientInterceptor, len(ints))
-			for i, in := range ints {
-				grpcInts[i] = ClientInterceptorAsGrpcStream(in)
-			}
-			return StreamClientInterceptorToUnary(CombineStreamClientInterceptors(grpcInts...))
-		},
-		nil, nil))
-	t.Run("convertFromStreamThenCombine", asTest(
-		nil,
-		func(ints []ClientInterceptor) grpc.UnaryClientInterceptor {
-			grpcInts := make([]grpc.UnaryClientInterceptor, len(ints))
-			for i, in := range ints {
-				grpcInts[i] = StreamClientInterceptorToUnary(ClientInterceptorAsGrpcStream(in))
+				grpcInts[i] = StreamClientInterceptorToUnary(in)
 			}
 			return CombineUnaryClientInterceptors(grpcInts...)
 		},
@@ -113,50 +108,43 @@ func TestClientInterceptors(t *testing.T) {
 }
 
 func TestServerInterceptors(t *testing.T) {
-	t.Run("combineThenConvert", asTest(
+	t.Run("combine", asTest(
 		nil, nil,
-		func(ints []ServerInterceptor) grpc.StreamServerInterceptor {
-			return ServerInterceptorAsGrpcStream(CombineServerInterceptors(ints))
+		func(ints []grpc.StreamServerInterceptor) grpc.StreamServerInterceptor {
+			return CombineStreamServerInterceptors(ints...)
 		},
-		func(ints []ServerInterceptor) grpc.UnaryServerInterceptor {
-			return ServerInterceptorAsGrpcUnary(CombineServerInterceptors(ints))
-		}))
-	t.Run("combineThenConvertFromStream", asTest(
+		nil))
+	t.Run("combineThenConvert", asTest(
 		nil, nil, nil,
-		func(ints []ServerInterceptor) grpc.UnaryServerInterceptor {
-			return StreamServerInterceptorToUnary(ServerInterceptorAsGrpcStream(CombineServerInterceptors(ints)))
+		func(ints []grpc.StreamServerInterceptor) grpc.UnaryServerInterceptor {
+			return StreamServerInterceptorToUnary(CombineStreamServerInterceptors(ints...))
+		}))
+	t.Run("convertInChunks", asTest(
+		nil, nil, nil,
+		func(ints []grpc.StreamServerInterceptor) grpc.UnaryServerInterceptor {
+			// We break these up into a mix of unary and stream interceptors and then use
+			// combineIntoUnary, which will collapse (convert then combine) adjacent stream
+			// interceptors into a single unary interceptor and then combine the resulting
+			// set of unary interceptors.
+			var converted []interface{}
+			j, k := 0, 1
+			for i := range ints {
+				if i == 0 || i >= j + k {
+					converted = append(converted, StreamServerInterceptorToUnary(ints[i]))
+					j = i + 1
+					k++
+				} else {
+					converted = append(converted, ints[i])
+				}
+			}
+			return combineServerInterceptorsIntoUnary(converted)
 		}))
 	t.Run("convertThenCombine", asTest(
-		nil, nil,
-		func(ints []ServerInterceptor) grpc.StreamServerInterceptor {
-			grpcInts := make([]grpc.StreamServerInterceptor, len(ints))
-			for i, in := range ints {
-				grpcInts[i] = ServerInterceptorAsGrpcStream(in)
-			}
-			return CombineStreamServerInterceptors(grpcInts...)
-		},
-		func(ints []ServerInterceptor) grpc.UnaryServerInterceptor {
+		nil, nil, nil,
+		func(ints []grpc.StreamServerInterceptor) grpc.UnaryServerInterceptor {
 			grpcInts := make([]grpc.UnaryServerInterceptor, len(ints))
 			for i, in := range ints {
-				grpcInts[i] = ServerInterceptorAsGrpcUnary(in)
-			}
-			return CombineUnaryServerInterceptors(grpcInts...)
-		}))
-	t.Run("convertThenCombineFromStream", asTest(
-		nil, nil, nil,
-		func(ints []ServerInterceptor) grpc.UnaryServerInterceptor {
-			grpcInts := make([]grpc.StreamServerInterceptor, len(ints))
-			for i, in := range ints {
-				grpcInts[i] = ServerInterceptorAsGrpcStream(in)
-			}
-			return StreamServerInterceptorToUnary(CombineStreamServerInterceptors(grpcInts...))
-		}))
-	t.Run("convertFromStreamThenCombine", asTest(
-		nil, nil, nil,
-		func(ints []ServerInterceptor) grpc.UnaryServerInterceptor {
-			grpcInts := make([]grpc.UnaryServerInterceptor, len(ints))
-			for i, in := range ints {
-				grpcInts[i] = StreamServerInterceptorToUnary(ServerInterceptorAsGrpcStream(in))
+				grpcInts[i] = StreamServerInterceptorToUnary(in)
 			}
 			return CombineUnaryServerInterceptors(grpcInts...)
 		}))
@@ -168,10 +156,10 @@ var payload = &grpc_testing.Payload{
 }
 
 func asTest(
-	clientStream func([]ClientInterceptor) grpc.StreamClientInterceptor,
-	clientUnary func([]ClientInterceptor) grpc.UnaryClientInterceptor,
-	serverStream func([]ServerInterceptor) grpc.StreamServerInterceptor,
-	serverUnary func([]ServerInterceptor) grpc.UnaryServerInterceptor) func(t *testing.T) {
+	clientStream func([]grpc.StreamClientInterceptor) grpc.StreamClientInterceptor,
+	clientUnary func([]grpc.StreamClientInterceptor) grpc.UnaryClientInterceptor,
+	serverStream func([]grpc.StreamServerInterceptor) grpc.StreamServerInterceptor,
+	serverUnary func([]grpc.StreamServerInterceptor) grpc.UnaryServerInterceptor) func(t *testing.T) {
 
 	return func(t *testing.T) {
 		defer resetInterceptors()
@@ -265,10 +253,10 @@ func asTest(
 }
 
 func setInterceptors(desc *methodDesc, lock *sync.Mutex, ints, reqs, resps *[]int,
-	clientStream func([]ClientInterceptor) grpc.StreamClientInterceptor,
-	clientUnary func([]ClientInterceptor) grpc.UnaryClientInterceptor,
-	serverStream func([]ServerInterceptor) grpc.StreamServerInterceptor,
-	serverUnary func([]ServerInterceptor) grpc.UnaryServerInterceptor) {
+	clientStream func([]grpc.StreamClientInterceptor) grpc.StreamClientInterceptor,
+	clientUnary func([]grpc.StreamClientInterceptor) grpc.UnaryClientInterceptor,
+	serverStream func([]grpc.StreamServerInterceptor) grpc.StreamServerInterceptor,
+	serverUnary func([]grpc.StreamServerInterceptor) grpc.UnaryServerInterceptor) {
 
 	ci := makeClientInterceptors(desc, lock, ints, reqs, resps)
 	var csi grpc.StreamClientInterceptor
@@ -295,18 +283,18 @@ func setInterceptors(desc *methodDesc, lock *sync.Mutex, ints, reqs, resps *[]in
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&actualServerUnary)), unsafe.Pointer(&sui))
 }
 
-const numInterceptors = 3
+const numInterceptors = 10
 
-func makeClientInterceptors(desc *methodDesc, lock *sync.Mutex, ints, reqs, resps *[]int) []ClientInterceptor {
-	var ret []ClientInterceptor
+func makeClientInterceptors(desc *methodDesc, lock *sync.Mutex, ints, reqs, resps *[]int) []grpc.StreamClientInterceptor {
+	var ret []grpc.StreamClientInterceptor
 	for i := 0; i < numInterceptors; i++ {
 		ret = append(ret, makeClientInterceptor(desc, i, lock, ints, reqs, resps))
 	}
 	return ret
 }
 
-func makeServerInterceptors(desc *methodDesc, lock *sync.Mutex, ints, reqs, resps *[]int) []ServerInterceptor {
-	var ret []ServerInterceptor
+func makeServerInterceptors(desc *methodDesc, lock *sync.Mutex, ints, reqs, resps *[]int) []grpc.StreamServerInterceptor {
+	var ret []grpc.StreamServerInterceptor
 	for i := 0; i < numInterceptors; i++ {
 		ret = append(ret, makeServerInterceptor(desc, i+numInterceptors, lock, ints, reqs, resps))
 	}
@@ -328,12 +316,12 @@ func checkCounts(t *testing.T, lock *sync.Mutex, ints, reqs, resps *[]int, incCl
 	if incClient {
 		start = 0
 	} else {
-		start = 3
+		start = numInterceptors
 	}
 	if incServer {
-		end = 6
+		end = numInterceptors*2
 	} else {
-		end = 3
+		end = numInterceptors
 	}
 
 	// interceptors invoked in order
@@ -346,7 +334,7 @@ func checkCounts(t *testing.T, lock *sync.Mutex, ints, reqs, resps *[]int, incCl
 	reqi := 0
 	for j := 0; j < numReqs; j++ {
 		for i := start; i < end; i++ {
-			eq(t, i*10, (*reqs)[reqi], "Wrong message observer")
+			eq(t, i*10, (*reqs)[reqi], "Wrong request message observer")
 			reqi++
 		}
 	}
@@ -354,7 +342,7 @@ func checkCounts(t *testing.T, lock *sync.Mutex, ints, reqs, resps *[]int, incCl
 	respi := 0
 	for j := 0; j < numResps; j++ {
 		for i := end - 1; i >= start; i-- {
-			eq(t, i*100, (*resps)[respi], "Wrong message observer")
+			eq(t, i*100, (*resps)[respi], "Wrong response message observer")
 			respi++
 		}
 	}
@@ -400,51 +388,142 @@ var bidiStreamMethod = &methodDesc{
 	respType:     reflect.TypeOf((*grpc_testing.StreamingOutputCallResponse)(nil)),
 }
 
-func makeClientInterceptor(desc *methodDesc, index int, lock *sync.Mutex, ints, reqs, resps *[]int) ClientInterceptor {
-	return func(ctx context.Context, cc *grpc.ClientConn, info *StreamClientInfo, opts []grpc.CallOption, proceed ClientInvocation) error {
-		return intercept("client", ctx, info, opts, proceed, desc, index, lock, ints, reqs, resps)
-	}
-}
-
-func makeServerInterceptor(desc *methodDesc, index int, lock *sync.Mutex, ints, reqs, resps *[]int) ServerInterceptor {
-	return func(ctx context.Context, srv interface{}, info *grpc.StreamServerInfo, proceed ServerInvocation) error {
-		return intercept("server", ctx,
-			&StreamClientInfo{FullMethod: info.FullMethod, IsClientStream: info.IsClientStream, IsServerStream: info.IsServerStream}, nil,
-			func(ctx context.Context, _ []grpc.CallOption, reqObs MessageObserver, respObs MessageObserver) error {
-				return proceed(ctx, reqObs, respObs)
-			},
-			desc, index, lock, ints, reqs, resps)
-	}
-}
-
-func intercept(where string, ctx context.Context, info *StreamClientInfo, opts []grpc.CallOption, proceed ClientInvocation, desc *methodDesc, index int, lock *sync.Mutex, ints, reqs, resps *[]int) error {
-	if info.FullMethod != desc.name {
-		return fmt.Errorf("Wrong method in %s; got %q, expected %q", where, info.FullMethod, desc.name)
-	}
-	if info.IsClientStream != desc.clientStream {
-		return fmt.Errorf("Wrong client streaming mode in %s; got %q, expected %q", where, info.IsClientStream, desc.clientStream)
-	}
-	if info.IsServerStream != desc.serverStream {
-		return fmt.Errorf("Wrong server streaming mode in %s; got %q, expected %q", where, info.IsServerStream, desc.serverStream)
-	}
-	lock.Lock()
-	*ints = append(*ints, index)
-	lock.Unlock()
-	reqObs := makeObserver(where, desc.reqType, index*10, lock, reqs)
-	respObs := makeObserver(where, desc.respType, index*100, lock, resps)
-	return proceed(ctx, opts, reqObs, respObs)
-}
-
-func makeObserver(where string, msgType reflect.Type, index int, lock *sync.Mutex, msgs *[]int) MessageObserver {
-	return func(m interface{}) error {
-		if reflect.TypeOf(m) != msgType {
-			return fmt.Errorf("Wrong message type in %s; got %q, expected %q", where, reflect.TypeOf(m), msgType)
+func makeClientInterceptor(desc *methodDesc, index int, lock *sync.Mutex, ints, reqs, resps *[]int) grpc.StreamClientInterceptor {
+	return func(ctx context.Context, d *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		if method != desc.name {
+			return nil, fmt.Errorf("Wrong method in client %d; got %q, expected %q", index, d.StreamName, desc.name)
+		}
+		if d.ClientStreams != desc.clientStream {
+			return nil, fmt.Errorf("Wrong client streaming mode in client %d; got %q, expected %q", index, d.ClientStreams, desc.clientStream)
+		}
+		if d.ServerStreams != desc.serverStream {
+			return nil, fmt.Errorf("Wrong server streaming mode in client %d; got %q, expected %q", index, d.ServerStreams, desc.serverStream)
 		}
 		lock.Lock()
-		*msgs = append(*msgs, index)
+		*ints = append(*ints, index)
 		lock.Unlock()
-		return nil
+		cs, err := streamer(ctx, d, cc, method, opts...)
+		if err != nil {
+			return nil, err
+		}
+		return &wrappedClientStream{cs, desc, index, lock, reqs, resps}, nil
 	}
+}
+
+type wrappedClientStream struct {
+	cs          grpc.ClientStream
+	desc        *methodDesc
+	index       int
+	lock        *sync.Mutex
+	reqs, resps *[]int
+}
+
+func (s *wrappedClientStream) Header() (metadata.MD, error) {
+	return s.cs.Header()
+}
+
+func (s *wrappedClientStream) Trailer() metadata.MD {
+	return s.cs.Trailer()
+}
+
+func (s *wrappedClientStream) CloseSend() error {
+	return s.cs.CloseSend()
+}
+
+func (s *wrappedClientStream) Context() context.Context {
+	return s.cs.Context()
+}
+
+func (s *wrappedClientStream) SendMsg(m interface{}) error {
+	if reflect.TypeOf(m) != s.desc.reqType {
+		return fmt.Errorf("Wrong request message type in client %d; got %q, expected %q", s.index, reflect.TypeOf(m), s.desc.reqType)
+	}
+	s.lock.Lock()
+	*s.reqs = append(*s.reqs, s.index*10)
+	s.lock.Unlock()
+	return s.cs.SendMsg(m)
+}
+
+func (s *wrappedClientStream) RecvMsg(m interface{}) error {
+	if reflect.TypeOf(m) != s.desc.respType {
+		return fmt.Errorf("Wrong response message type in client %d; got %q, expected %q", s.index, reflect.TypeOf(m), s.desc.respType)
+	}
+	err := s.cs.RecvMsg(m)
+	if err != nil {
+		return err
+	}
+	s.lock.Lock()
+	*s.resps = append(*s.resps, s.index*100)
+	s.lock.Unlock()
+	return nil
+}
+
+func makeServerInterceptor(desc *methodDesc, index int, lock *sync.Mutex, ints, reqs, resps *[]int) grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if info.FullMethod != desc.name {
+			return fmt.Errorf("Wrong method in server %d; got %q, expected %q", index, info.FullMethod, desc.name)
+		}
+		if info.IsClientStream != desc.clientStream {
+			return fmt.Errorf("Wrong client streaming mode in server %d; got %q, expected %q", index, info.IsClientStream, desc.clientStream)
+		}
+		if info.IsServerStream != desc.serverStream {
+			return fmt.Errorf("Wrong server streaming mode in server %d; got %q, expected %q", index, info.IsServerStream, desc.serverStream)
+		}
+		lock.Lock()
+		*ints = append(*ints, index)
+		lock.Unlock()
+		return handler(srv, &wrappedServerStream{ss, desc, index, lock, reqs, resps})
+	}
+}
+
+type wrappedServerStream struct {
+	ss          grpc.ServerStream
+	desc        *methodDesc
+	index       int
+	lock        *sync.Mutex
+	reqs, resps *[]int
+}
+
+
+func (s *wrappedServerStream) SetHeader(md metadata.MD) error {
+	return s.ss.SetHeader(md)
+}
+
+func (s *wrappedServerStream) SendHeader(md metadata.MD) error {
+	return s.ss.SendHeader(md)
+}
+
+func (s *wrappedServerStream) SetTrailer(md metadata.MD) {
+	s.ss.SetTrailer(md)
+}
+
+func (s *wrappedServerStream) Context() context.Context {
+	return s.ss.Context()
+}
+
+func (s *wrappedServerStream) SendMsg(m interface{}) error {
+	if reflect.TypeOf(m) != s.desc.respType {
+		return fmt.Errorf("Wrong response message type in server %d; got %q, expected %q", s.index, reflect.TypeOf(m), s.desc.respType)
+	}
+	s.lock.Lock()
+	*s.resps = append(*s.resps, s.index*100)
+	s.lock.Unlock()
+	err := s.ss.SendMsg(m)
+	return err
+}
+
+func (s *wrappedServerStream) RecvMsg(m interface{}) error {
+	if reflect.TypeOf(m) != s.desc.reqType {
+		return fmt.Errorf("Wrong request message type in server %d; got %q, expected %q", s.index, reflect.TypeOf(m), s.desc.reqType)
+	}
+	err := s.ss.RecvMsg(m)
+	if err != nil {
+		return err
+	}
+	s.lock.Lock()
+	*s.reqs = append(*s.reqs, s.index*10)
+	s.lock.Unlock()
+	return nil
 }
 
 func swappingStreamClientInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
@@ -572,15 +651,46 @@ func (_ TestService) HalfDuplexCall(ss grpc_testing.TestService_HalfDuplexCallSe
 // simple assertion helpers
 
 func ok(t *testing.T, err error, failureMsgFmt string, msgFmtArgs ...interface{}) {
-	assert(t, err == nil, failureMsgFmt, msgFmtArgs...)
+	if err != nil {
+		caller := caller()
+		msg := fmt.Sprintf(failureMsgFmt, msgFmtArgs...)
+		if msg == "" {
+			t.Fatalf("%s -- Unexpected error: %v", caller, err.Error())
+		} else {
+			t.Fatalf("%s -- %s: %v", caller, msg, err.Error())
+		}
+	}
 }
 
 func eq(t *testing.T, expected, actual interface{}, failureMsgFmt string, msgFmtArgs ...interface{}) {
-	assert(t, expected == actual, failureMsgFmt, msgFmtArgs...)
+	if expected != actual {
+		caller := caller()
+		msg := fmt.Sprintf(failureMsgFmt, msgFmtArgs...)
+		if msg == "" {
+			t.Fatalf("%s -- Expecting %v (%v); Got %v (%v)", caller, expected, reflect.TypeOf(expected), actual, reflect.TypeOf(actual))
+		} else {
+			t.Fatalf("%s -- %s. Expecting %v (%v); Got %v (%v)", caller, msg, expected, reflect.TypeOf(expected), actual, reflect.TypeOf(actual))
+		}
+	}
 }
 
 func assert(t *testing.T, condition bool, failureMsgFmt string, msgFmtArgs ...interface{}) {
 	if !condition {
-		t.Errorf(failureMsgFmt, msgFmtArgs...)
+		caller := caller()
+		msg := fmt.Sprintf(failureMsgFmt, msgFmtArgs...)
+		if msg == "" {
+			t.Fatalf("%s -- Assertion failed", caller)
+		} else {
+			t.Fatalf("%s -- %s", caller, msg)
+		}
+	}
+}
+
+func caller() string {
+	_, file, line, ok := runtime.Caller(2)
+	if ok {
+		return fmt.Sprintf("%s:%d", path.Base(file), line)
+	} else {
+		return "(unknown source location)"
 	}
 }
