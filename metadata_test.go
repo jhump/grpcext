@@ -183,7 +183,7 @@ func TestSet(t *testing.T) {
 func TestMerge(t *testing.T) {
 	md := Create("key", "value1", "Key", "value2", "foo", "bar", "foo", "baz", "snafu", "fubar")
 	md2 := Create("K", "v", "X", "yz", "kEY", "value3", "SNAFu", "froober")
-	md.Merge(md2)
+	md.AddAll(md2)
 
 	exp := MD{
 		"k":     {"v"},
@@ -265,7 +265,7 @@ func TestWithReplacement(t *testing.T) {
 func TestCombine(t *testing.T) {
 	md := Create("key", "value1", "Key", "value2", "foo", "bar", "foo", "baz", "snafu", "fubar")
 	md2 := Create("K", "v", "X", "yz", "kEY", "value3", "SNAFu", "froober")
-	md3 := md.Combine(md2)
+	md3 := md.WithAll(md2)
 
 	exp := MD{
 		"k":     {"v"},

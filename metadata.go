@@ -73,21 +73,21 @@ func Create(keysValues ...string) MD {
 	return md
 }
 
-// Combine returns the result of combining this metadata with the given set of metadata.
+// WithAll returns the result of combining this metadata with the given set of metadata.
 // Neither of the given metadata objects are modified: a new metadata object is returned.
 // If both objects contain a given key, the values for that key are combined with this
 // metadata object's values appearing before the given metadata object's values.
-func (md MD) Combine(other MD) MD {
+func (md MD) WithAll(other MD) MD {
 	nmd := md.Clone()
-	nmd.Merge(other)
+	nmd.AddAll(other)
 	return nmd
 }
 
-// Merge adds the given metadata to this object. If the given object contains keys that
+// AddAll adds the given metadata to this object. If the given object contains keys that
 // already exist in this metadata, its values are appended to existing values. This is
-// just like Combine except that it modifies the current metadata, in place, instead of
+// just like WithAll except that it modifies the current metadata, in place, instead of
 // returning a new object.
-func (md MD) Merge(other MD) {
+func (md MD) AddAll(other MD) {
 	for k, v := range other {
 		md[k] = append(md[k], v...)
 	}
@@ -170,8 +170,17 @@ func (md MD) GetAll(key string) []string {
 	return md[k]
 }
 
+// Without returns the contents of the current metadata, but without the given key. If
+// the given key does not exist, this effectively returns a copy of the current metadata.
+func (md MD) Without(key string) MD {
+	nmd := md.Clone()
+	nmd.Remove(key)
+	return nmd
+}
+
 // Remove deletes the given key from this metadata, returning true if it was present and
-// removed or false if the key did not exist.
+// removed or false if the key did not exist. This is much like Without except that it
+// modifies the current metadata, in place, instead of returning a new object.
 func (md MD) Remove(key string) bool {
 	k := strings.ToLower(key)
 	_, ok := md[k]
@@ -181,9 +190,19 @@ func (md MD) Remove(key string) bool {
 	return ok
 }
 
+// Without returns the contents of the current metadata, but without the given key and value.
+// If the given key does not exist or does not contain the given value, this effectively
+// returns a copy of the current metadata.
+func (md MD) WithoutValue(key, val string) MD {
+	nmd := md.Clone()
+	nmd.RemoveValue(key, val)
+	return nmd
+}
+
 // RemoveValue deletes the given value from the list of values for the given key from
 // this metadata. It returns true if the given key and value were found and removed, or
-// false if either the key or value were not found.
+// false if either the key or value were not found. This is much like WithoutValue except
+// that it modifies the current metadata, in place, instead of returning a new object.
 func (md MD) RemoveValue(key, val string) bool {
 	k := strings.ToLower(key)
 	v := md[k]
